@@ -272,139 +272,146 @@ def init_state():
     if "model" not in st.session_state:
         st.session_state.model = "gemini-1.5-flash"
 
-init_state()
+def run_ui():
+    init_state()
 
-# ---------------------------
-# Sidebar: settings and tracker (no API key input box)
-# ---------------------------
-st.sidebar.subheader("Settings")
+    # ---------------------------
+    # Sidebar: settings and tracker (no API key input box)
+    # ---------------------------
+    st.sidebar.subheader("Settings")
 
-# Read key from secrets or env only; do NOT show it in the UI
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
+    # Read key from secrets or env only; do NOT show it in the UI
+    try:
+        GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
+    except Exception:
+        GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-use_llm = st.sidebar.toggle("Use LLM responses (fallback to offline if off or key missing)", value=True)
-st.session_state.use_llm = use_llm
+    use_llm = st.sidebar.toggle("Use LLM responses (fallback to offline if off or key missing)", value=True)
+    st.session_state.use_llm = use_llm
 
-gemini_model = st.sidebar.selectbox(
-    "Gemini model",
-    options=["gemini-1.5-flash", "gemini-1.5-pro"],
-    index=0
-)
-st.session_state.model = gemini_model
+    gemini_model = st.sidebar.selectbox(
+        "Gemini model",
+        options=["gemini-1.5-flash", "gemini-1.5-pro"],
+        index=0
+    )
+    st.session_state.model = gemini_model
 
-# Status pill (no key shown)
-status = "Connected ✅" if (GEMINI_API_KEY and GEMINI_AVAILABLE) else "Not configured — using offline responses"
-st.sidebar.caption(f"Gemini status: {status}")
+    # Status pill (no key shown)
+    status = "Connected ✅" if (GEMINI_API_KEY and GEMINI_AVAILABLE) else "Not configured — using offline responses"
+    st.sidebar.caption(f"Gemini status: {status}")
 
-st.sidebar.divider()
-st.sidebar.subheader("Session controls")
-if st.sidebar.button("Start new conversation"):
-    st.session_state.messages = []
-    st.session_state.moods = []
-    st.rerun()
+    st.sidebar.divider()
+    st.sidebar.subheader("Session controls")
+    if st.sidebar.button("Start new conversation"):
+        st.session_state.messages = []
+        st.session_state.moods = []
+        st.rerun()
 
-export = st.sidebar.button("Export mood log (CSV)")
-if export:
-    if st.session_state.moods:
-        df = pd.DataFrame(st.session_state.moods)
-        fname = f"mood_log_{int(time.time())}.csv"
-        df.to_csv(fname, index=False)
-        st.sidebar.success(f"Saved {fname}")
-    else:
-        st.sidebar.info("No mood data to export yet.")
+    export = st.sidebar.button("Export mood log (CSV)")
+    if export:
+        if st.session_state.moods:
+            df = pd.DataFrame(st.session_state.moods)
+            fname = f"mood_log_{int(time.time())}.csv"
+            df.to_csv(fname, index=False)
+            st.sidebar.success(f"Saved {fname}")
+        else:
+            st.sidebar.info("No mood data to export yet.")
 
-st.sidebar.divider()
-st.sidebar.caption("This tool supports wellbeing but isn’t a substitute for professional care. If you’re in immediate danger, call your local emergency number.")
+    st.sidebar.divider()
+    st.sidebar.caption("This tool supports wellbeing but isn’t a substitute for professional care. If you’re in immediate danger, call your local emergency number.")
 
-# ---------------------------
-# Header
-# ---------------------------
-st.title("Student Mental Health Companion 💙")
-st.caption("A supportive space to check in, reflect, and find small steps forward. If you’re in immediate danger, please contact your local emergency number.")
+    # ---------------------------
+    # Header
+    # ---------------------------
+    st.title("Student Mental Health Companion 💙")
+    st.caption("A supportive space to check in, reflect, and find small steps forward. If you’re in immediate danger, please contact your local emergency number.")
 
-# ---------------------------
-# Render chat history
-# ---------------------------
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.write(m["content"])
-        if m.get("meta") and m["role"] == "assistant":
-            mood_meta = m["meta"]
+    # ---------------------------
+    # Render chat history
+    # ---------------------------
+    for m in st.session_state.messages:
+        with st.chat_message(m["role"]):
+            st.write(m["content"])
+            if m.get("meta") and m["role"] == "assistant":
+                mood_meta = m["meta"]
+                st.caption(
+                    f"Mood reading • Sentiment: {mood_meta.get('sentiment')} (score {mood_meta.get('compound'):.2f}) • "
+                    f"Emotion: {mood_meta.get('emotion')} (conf {mood_meta.get('confidence')})"
+                )
+                tip = tip_for_emotion(mood_meta.get("emotion", "uncertain"))
+                with st.expander(f"Try this: {tip['title']}"):
+                    for step in tip["steps"]:
+                        st.write(f"- {step}")
+
+    # ---------------------------
+    # Chat input
+    # ---------------------------
+    user_input = st.chat_input("How are you feeling today?")
+    if user_input:
+        # User message
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.write(user_input)
+
+        # Mood + crisis check
+        mood = analyze_mood(user_input)
+        st.session_state.moods.append({
+            "timestamp": dt.datetime.now().isoformat(timespec="seconds"),
+            "compound": mood["compound"],
+            "sentiment": mood["sentiment"],
+            "emotion": mood["emotion"],
+            "confidence": mood["confidence"],
+        })
+
+        crisis_hit = detect_crisis(user_input)
+        if crisis_hit:
+            reply = crisis_support_message()
+            with st.chat_message("assistant"):
+                st.write(reply)
+                st.warning("If you're in immediate danger, please contact your local emergency number right now.")
+                st.link_button("Find a helpline", "https://findahelpline.com")
+            st.session_state.messages.append({"role": "assistant", "content": reply, "meta": mood})
+            st.stop()
+
+        # Assistant response (Gemini or offline)
+        if use_llm and GEMINI_API_KEY and GEMINI_AVAILABLE:
+            assistant_text = call_gemini_response(user_input, st.session_state.messages, mood, GEMINI_API_KEY, model=gemini_model)
+        else:
+            if use_llm and (not GEMINI_API_KEY or not GEMINI_AVAILABLE):
+                st.info("Gemini not configured — using offline responses for now.")
+            assistant_text = offline_response(user_input, mood)
+
+        with st.chat_message("assistant"):
+            st.write(assistant_text)
             st.caption(
-                f"Mood reading • Sentiment: {mood_meta.get('sentiment')} (score {mood_meta.get('compound'):.2f}) • "
-                f"Emotion: {mood_meta.get('emotion')} (conf {mood_meta.get('confidence')})"
+                f"Mood reading • Sentiment: {mood.get('sentiment')} (score {mood.get('compound'):.2f}) • "
+                f"Emotion: {mood.get('emotion')} (conf {mood.get('confidence')})"
             )
-            tip = tip_for_emotion(mood_meta.get("emotion", "uncertain"))
+            tip = tip_for_emotion(mood.get("emotion", "uncertain"))
             with st.expander(f"Try this: {tip['title']}"):
                 for step in tip["steps"]:
                     st.write(f"- {step}")
 
-# ---------------------------
-# Chat input
-# ---------------------------
-user_input = st.chat_input("How are you feeling today?")
-if user_input:
-    # User message
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.write(user_input)
+        st.session_state.messages.append({"role": "assistant", "content": assistant_text, "meta": mood})
 
-    # Mood + crisis check
-    mood = analyze_mood(user_input)
-    st.session_state.moods.append({
-        "timestamp": dt.datetime.now().isoformat(timespec="seconds"),
-        "compound": mood["compound"],
-        "sentiment": mood["sentiment"],
-        "emotion": mood["emotion"],
-        "confidence": mood["confidence"],
-    })
-
-    crisis_hit = detect_crisis(user_input)
-    if crisis_hit:
-        reply = crisis_support_message()
-        with st.chat_message("assistant"):
-            st.write(reply)
-            st.warning("If you're in immediate danger, please contact your local emergency number right now.")
-            st.link_button("Find a helpline", "https://findahelpline.com")
-        st.session_state.messages.append({"role": "assistant", "content": reply, "meta": mood})
-        st.stop()
-
-    # Assistant response (Gemini or offline)
-    if use_llm and GEMINI_API_KEY and GEMINI_AVAILABLE:
-        assistant_text = call_gemini_response(user_input, st.session_state.messages, mood, GEMINI_API_KEY, model=gemini_model)
-    else:
-        if use_llm and (not GEMINI_API_KEY or not GEMINI_AVAILABLE):
-            st.info("Gemini not configured — using offline responses for now.")
-        assistant_text = offline_response(user_input, mood)
-
-    with st.chat_message("assistant"):
-        st.write(assistant_text)
-        st.caption(
-            f"Mood reading • Sentiment: {mood.get('sentiment')} (score {mood.get('compound'):.2f}) • "
-            f"Emotion: {mood.get('emotion')} (conf {mood.get('confidence')})"
+    # ---------------------------
+    # Mood tracker chart
+    # ---------------------------
+    if st.session_state.moods:
+        st.divider()
+        st.subheader("Your mood over time")
+        df = pd.DataFrame(st.session_state.moods)
+        chart = (
+            alt.Chart(df)
+            .mark_line(point=True)
+            .encode(
+                x=alt.X("timestamp:T", title="Time"),
+                y=alt.Y("compound:Q", title="Sentiment score (-1 to 1)"),
+                color=alt.value("#3b82f6")
+            )
+            .properties(height=220)
         )
-        tip = tip_for_emotion(mood.get("emotion", "uncertain"))
-        with st.expander(f"Try this: {tip['title']}"):
-            for step in tip["steps"]:
-                st.write(f"- {step}")
+        st.altair_chart(chart, use_container_width=True)
 
-    st.session_state.messages.append({"role": "assistant", "content": assistant_text, "meta": mood})
-
-# ---------------------------
-# Mood tracker chart
-# ---------------------------
-if st.session_state.moods:
-    st.divider()
-    st.subheader("Your mood over time")
-    df = pd.DataFrame(st.session_state.moods)
-    chart = (
-        alt.Chart(df)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("timestamp:T", title="Time"),
-            y=alt.Y("compound:Q", title="Sentiment score (-1 to 1)"),
-            color=alt.value("#3b82f6")
-        )
-        .properties(height=220)
-    )
-    st.altair_chart(chart, use_container_width=True)
+if __name__ == "__main__":
+    run_ui()
