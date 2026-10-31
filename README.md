@@ -1,5 +1,15 @@
 # Student Mental Health Companion
 
+<div align="center">
+
+[![CI Verified](https://github.com/Amanatar/student-mental-health-companion/actions/workflows/ci-verify.yml/badge.svg)](https://github.com/Amanatar/student-mental-health-companion/actions)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io)
+[![Gemini API](https://img.shields.io/badge/Gemini_API-8E75C2?logo=google-gemini&logoColor=white)](https://deepmind.google/technologies/gemini/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+</div>
+
 Context-aware affective computing and supportive dialogue assistant designed for university students navigating academic stress, anxiety, and burnout.
 
 ## System Architecture
